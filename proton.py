@@ -55,25 +55,8 @@ def tokenize(code):
 	if unmatched:
 		yield from modify(unmatched)
 
-DEBUG = True
-G_INDENT = 0
-
 def Grammar(name):
-	def inside(func):
-		def inner(*a, **k):
-			if DEBUG:
-				global G_INDENT
-				output = " ".join(map(str, a[0]))
-				print(" " * G_INDENT + "[%s]" % name)
-				G_INDENT += 1
-			result = func(*a, **k)
-			if DEBUG:
-				G_INDENT -= 1
-				print(" " * G_INDENT + name, output, "=>", result, "//", *a[0])
-				if not result: print(" " * G_INDENT + name + " [X]")
-			return result
-		return inner
-	return inside
+	return lambda f: f
 		
 
 def OperParser(last, opers, name, not_first = None):
