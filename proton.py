@@ -56,18 +56,21 @@ def tokenize(code):
 		yield from modify(unmatched)
 
 def Grammar(name):
-	return lambda f: f
+	def inside(func):
+		return func
+	return inside
 		
 
 def OperParser(last, opers, name, not_first = None):
 	not_first = not_first or last
 	@Grammar(name)
 	def inner(tokens):
-		if last(tokens[:]):
-			values = [last(tokens)]
+		value = last(tokens)
+		if value:
+			values = [value]
 			operators = []
 			while tokens and tokens[0][0] == "symbol" and tokens[0][1] in opers:
-				operators.append(tokens.pop(0))
+				operators.append(tokens.pop(0)[1])
 				values.append(not_first(tokens))
 			if operators:
 				return (name, {"values": values, "operators": operators})
@@ -78,12 +81,12 @@ def OperParser(last, opers, name, not_first = None):
 @Grammar("Identifier")
 def Identifier(tokens):
 	if tokens and tokens[0][0] == "identifier":
-		return ("Identifier", tokens.pop(0))
+		return ("Identifier", tokens.pop(0)[1])
 
 @Grammar("Literal")
 def Literal(tokens):
 	if tokens and tokens[0][0] in ("number", "string"):
-		return ("Literal", tokens.pop(0))
+		return ("Literal", tokens.pop(0)[1])
 
 @Grammar("BracketedExpr")
 def BracketedExpr(tokens):
@@ -93,7 +96,7 @@ def BracketedExpr(tokens):
 		if not (tokens and tokens[0] == ("symbol", ")")):
 			raise RuntimeError("Unclosed bracket")
 		tokens.pop(0)
-		return result
+		return ("BracketedExpr", result)
 
 @Grammar("SingularValue")
 def SingularValue(tokens):
@@ -101,28 +104,24 @@ def SingularValue(tokens):
 
 @Grammar("Value")
 def Value(tokens):
-	index = 0
 	front = []
-	while index < len(tokens) and tokens[index][0] == "symbol" and tokens[index][1] in ["++", "--", "+", "-", "**", "*"]:
-		front.append(tokens[index][1])
-		index += 1
-	if SingularValue(tokens[index:]):
-		tokens[:] = tokens[index:]
-		inner = SingularValue(tokens)
-		index = 0
+	prev = tokens[:]
+	while tokens and tokens[0][0] == "symbol" and tokens[0][1] in ["++", "--", "+", "-", "**", "*"]:
+		front.append(tokens.pop(0)[1])
+	inner = SingularValue(tokens)
+	if inner:
 		back = []
-		while index < len(tokens) and tokens[index][0] == "symbol" and tokens[index][1] in ["++", "--"]:
-			back.append(tokens[index][1])
-			index += 1
-		tokens[:] = tokens[index:]
+		while tokens and tokens[0][0] == "symbol" and tokens[0][1] in ["++", "--"]:
+			back.append(tokens.pop(0)[1])
 		return ("Value", {"front": front, "inner": inner, "back": back})
+	tokens[:] = prev
 
 SubValue = OperParser(Value, ["."], "SubValue", Identifier)
 
 @Grammar("BracketCall")
 def BracketCall(tokens):
-	if SubValue(tokens[:]):
-		base = SubValue(tokens)
+	base = SubValue(tokens)
+	if base:
 		argument_lists = []
 		calltype = []
 		while tokens and tokens[0][0] == "symbol" and tokens[0][1] in ["[", "("]:
@@ -200,10 +199,12 @@ def Statement(tokens):
 
 @Grammar("Program")
 def Program(tokens):
+	statements = []
 	while tokens:
 		result = Statement(tokens)
-		if result: yield result
-		else: yield ("Unmatched", tokens.pop(0))
+		if result: statements.append(result)
+		else: tokens.pop(0)
+	return ("Program", statements)
 
 INDENT = 3
 
@@ -226,8 +227,101 @@ def prettyprint(expr, indent = 0, inline = False):
 			print(" " * indent * (not inline) + str(sub))
 	if list_mode and inline: print(" " * (indent - INDENT) + "]")
 
+def attempt(*factories, error = "All attempts failed"):
+	for func in factories:
+		try:
+			return func()
+		except:
+			pass
+	else:
+		raise RuntimeError(error)
+
+def getProtonAttr(obj, name, altname = None):
+	if obj["type"] == "__primitive":
+		try: return getattr(obj["value"], name)
+		except: return None
+	else:
+		return obj.get(altname or name, None)
+
+def downgrade(obj):
+	if obj["type"] == "__primitive": obj = obj["value"]
+	return obj
+
+def caller(func, *a, **k):
+	return lambda: func(*a, **k)
+
+def operError(symbol, left, right):
+	return "Operation %s not supported between objects of type %s and %s" % (symbol, left["type"], right["type"])
+
+def primitive(value):
+	return {"type": "__primitive", "value": value}
+
+def operGen(symbol, name, rname, altname = None, altrname = None):
+	altname = altname or name
+	altrname = altrname or rname
+	def inner(left, right):
+		l_oper = getProtonAttr(left, name, altname)
+		r_oper = getProtonAttr(right, rname, altrname)
+		L = downgrade(left)
+		R = downgrade(right)
+		return primitive(attempt(caller(l_oper, R), caller(r_oper, L), operError(symbol, left, right)))
+	return inner
+
+mul = operGen("*", "__mul__", "__rmul__")
+div = operGen("/", "__truediv__", "__rtruediv__")
+floordiv = operGen("//", "__floordiv__", "__rfloordiv__")
+mod = operGen("%", "__mod__", "__rmod__")
+
+def ceildiv(left, right):
+	try:
+		return primitive(-(-downgrade(left) // downgrade(right)))
+	except:
+		try:
+			return primitive(-(downgrade(left) // -downgrade(right)))
+		except:
+			pass
+	if "__ceildiv__" in left:
+		try:
+			return left["__ceildiv__"](downgrade(right))
+		except:
+			pass
+	if "__rceildiv__" in right:
+		try:
+			return right["__rceildiv__"](downgrade(left))
+		except:
+			pass
+	raise RuntimeError(operError("/^", left, right))
+
+def assign(tree, value, scope, global_scope):
+	pass
+
+def evaluate(tree, scope = {}, global_scope = {}):
+	name = tree[0]
+	if name == "Program":
+		value = None
+		for subtree in tree[1]:
+			value = evaluate(subtree)
+		return value
+	elif name == "Statement":
+		return evaluate(tree[1])
+	elif name == "Product":
+		values = tree[1]["values"][:]
+		operators = tree[1]["operators"][:]
+		value = evaluate(values.pop(0))
+		while operators:
+			operator = operators.pop(0)
+			value = [mul, div, floordiv, ceildiv, mod][["*", "/", "//", "/^", "%"].index(operator)](value, evaluate(values.pop(0)))
+		return value
+	elif name == "Value":
+		value = evaluate(tree[1]["inner"])
+		
+	else:
+		print(name + " not evaluated")
+
 tokens = list(tokenize(sys.stdin.read()))
 
 print(*tokens)
 
-prettyprint(list(Program(tokens)))
+tree = Program(tokens)
+
+print(evaluate(tree))
