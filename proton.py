@@ -271,6 +271,8 @@ mul = operGen("*", "__mul__", "__rmul__")
 div = operGen("/", "__truediv__", "__rtruediv__")
 floordiv = operGen("//", "__floordiv__", "__rfloordiv__")
 mod = operGen("%", "__mod__", "__rmod__")
+add = operGen("+", "__add__", "__radd__")
+sub = operGen("-", "__sub__", "__rsub__")
 
 def ceildiv(left, right):
 	try:
@@ -292,6 +294,15 @@ def ceildiv(left, right):
 			pass
 	raise RuntimeError(operError("/^", left, right))
 
+def evalopers(tree, funcs):
+	values = tree[1]["values"][:]
+	operators = tree[1]["operators"][:]
+	value = evaluate(values.pop(0))
+	while operators:
+		operator = operators.pop(0)
+		value = funcs[operator](value, evaluate(values.pop(0)))
+	return value
+
 def assign(tree, value, scope, global_scope):
 	pass
 
@@ -305,16 +316,17 @@ def evaluate(tree, scope = {}, global_scope = {}):
 	elif name == "Statement":
 		return evaluate(tree[1])
 	elif name == "Product":
-		values = tree[1]["values"][:]
-		operators = tree[1]["operators"][:]
-		value = evaluate(values.pop(0))
-		while operators:
-			operator = operators.pop(0)
-			value = [mul, div, floordiv, ceildiv, mod][["*", "/", "//", "/^", "%"].index(operator)](value, evaluate(values.pop(0)))
-		return value
+		return evalopers(tree, {"*": mul, "/": div, "//": floordiv, "/^": ceildiv, "%": mod})
+	elif name == "Sum":
+		return evalopers(tree, {"+": add, "-": sub})
 	elif name == "Value":
 		value = evaluate(tree[1]["inner"])
-		
+		return value # TODO
+	elif name == "Literal":
+		result = eval(tree[1])
+		return primitive(result) # TODO
+	elif name == "BracketedExpr":
+		return evaluate(tree[1]) # TODO
 	else:
 		print(name + " not evaluated")
 
