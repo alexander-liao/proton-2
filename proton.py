@@ -327,7 +327,10 @@ def evaluate(tree, scope = {}, global_scope = {}):
 		return value # TODO
 	elif name == "Literal":
 		result = eval(tree[1])
-		return primitive(result) # TODO
+		if isinstance(result, str):
+			return {"type": "str", "chars": list(map(ord, result))}
+		else:
+			return primitive(result)
 	elif name == "BracketedExpr":
 		return evaluate(tree[1]) # TODO
 	else:
