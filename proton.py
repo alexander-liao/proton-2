@@ -256,17 +256,18 @@ def operError(symbol, left, right):
 def primitive(value):
 	return {"type": "__primitive", "value": value}
 
-def operGen(symbol, name, rname, altname = None, altrname = None):
-	altname = altname or name
-	altrname = altrname or rname
+def operGen(symbol, name, rname):
 	def inner(left, right):
-		l_oper = getProtonAttr(left, name, altname)
-		r_oper = getProtonAttr(right, rname, altrname)
+		l_oper = getProtonAttr(left, name, symbol)
+		r_oper = getProtonAttr(right, rname, "@" + symbol)
 		L = downgrade(left)
 		R = downgrade(right)
 		return primitive(attempt(caller(l_oper, R), caller(r_oper, L), operError(symbol, left, right)))
 	return inner
 
+call = operGen("@", "__call__", "__getcalled__")
+index = operGen("#", "__getitem__", "__indexer__")
+exp = operGen("**", "__pow__", "__rpow__")
 mul = operGen("*", "__mul__", "__rmul__")
 div = operGen("/", "__truediv__", "__rtruediv__")
 floordiv = operGen("//", "__floordiv__", "__rfloordiv__")
@@ -315,6 +316,8 @@ def evaluate(tree, scope = {}, global_scope = {}):
 		return value
 	elif name == "Statement":
 		return evaluate(tree[1])
+	elif name == "InfixCall":
+		return evalopers(tree, {"@": call, "#": index})
 	elif name == "Product":
 		return evalopers(tree, {"*": mul, "/": div, "//": floordiv, "/^": ceildiv, "%": mod})
 	elif name == "Sum":
